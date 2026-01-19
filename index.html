@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
   <style>
     :root{
       --bg:#0f1220;
@@ -34,7 +35,9 @@
     }
     h1{ text-align:center; margin:8px 0 4px; font-size:22px }
     p{ text-align:center; margin:0 0 16px; color:var(--muted) }
+
     .links{ display:grid; gap:12px }
+
     a.link{
       text-decoration:none; color:var(--text); font-weight:600;
       padding:14px 16px; border-radius:14px; background:var(--card);
@@ -43,23 +46,149 @@
       transition:transform .12s ease, box-shadow .12s ease, background .12s ease
     }
     a.link:hover{ transform:translateY(-2px); box-shadow:0 10px 20px rgba(0,0,0,.25); background:#1b2060 }
-    .badge{ font-size:12px; color:#0b0e2b; background:var(--accent); padding:4px 8px; border-radius:999px }
+
+    .badge{
+      font-size:12px; color:#0b0e2b; background:var(--accent);
+      padding:4px 8px; border-radius:999px
+    }
+
+    .loading, .error{
+      text-align:center;
+      color: var(--muted);
+      padding: 10px 0;
+      font-size: 14px;
+    }
+
     footer{ text-align:center; margin-top:14px; color:#9aa0ff; font-size:12px }
   </style>
 </head>
+
 <body>
   <main class="wrap">
     <section class="card">
       <div class="avatar">B</div>
       <h1>Balta</h1>
       <p>Mis links importantes</p>
-      <div class="links">
-        <a class="link" href="https://www.instagram.com/baltacruu/">Instagram <span class="badge">social</span></a>
-        <a class="link" href="https://www.tiktok.com/@baltacru">Tiktok <span class="badge">social</span></a>
-         <a class="link" href="https://baltazarcruglak.github.io/tateti/">Tres en raya 🎮 <span class="badge">Game</span></a>
+
+      <!-- Links se cargan desde Google Sheets -->
+      <div id="links" class="links">
+        <div class="loading">Cargando links...</div>
       </div>
+
+      <div id="msg" class="error" style="display:none;"></div>
     </section>
-    <footer>Hecho con ❤️</footer>
+
+    <footer>Hecho por baltacru</footer>
   </main>
+
+  <script>
+    const SHEET_CSV_URL =
+      "https://docs.google.com/spreadsheets/d/e/2PACX-1vShY9MgHVZDqerX7u_OUiv4JzVTYRlRPs5BC_BK_NzhRAbmZGtGHnlOf6VYSNpAUMqFb8_YUe_Onz0_/pub?gid=0&single=true&output=csv";
+
+    // CSV parser simple que soporta comas dentro de comillas
+    function parseCSV(text) {
+      const rows = [];
+      let row = [];
+      let cur = "";
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        const next = text[i + 1];
+
+        if (ch === '"' && inQuotes && next === '"') {
+          cur += '"'; i++; // escape ""
+        } else if (ch === '"') {
+          inQuotes = !inQuotes;
+        } else if (ch === "," && !inQuotes) {
+          row.push(cur.trim());
+          cur = "";
+        } else if ((ch === "\n" || ch === "\r") && !inQuotes) {
+          if (cur.length || row.length) {
+            row.push(cur.trim());
+            rows.push(row);
+          }
+          row = [];
+          cur = "";
+          // saltear \r\n
+          if (ch === "\r" && next === "\n") i++;
+        } else {
+          cur += ch;
+        }
+      }
+      if (cur.length || row.length) {
+        row.push(cur.trim());
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    function safeText(s) {
+      return String(s ?? "").replace(/[&<>"']/g, m => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }[m]));
+    }
+
+    function makeBadge(url) {
+      const u = (url || "").toLowerCase();
+      if (u.includes("instagram.com") || u.includes("tiktok.com")) return "social";
+      if (u.includes("github.io") || u.includes("github.com")) return "code";
+      if (u.includes("discord")) return "chat";
+      return "link";
+    }
+
+    async function cargarLinks() {
+      const linksDiv = document.getElementById("links");
+      const msg = document.getElementById("msg");
+
+      try {
+        const res = await fetch(SHEET_CSV_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error("No se pudo leer el CSV");
+
+        const text = await res.text();
+        const table = parseCSV(text);
+
+        // Esperamos encabezado: title,url (o algo similar)
+        // Usamos primera fila como header y el resto como data
+        const data = table.slice(1).filter(r => r.length >= 2);
+
+        linksDiv.innerHTML = "";
+
+        if (data.length === 0) {
+          linksDiv.innerHTML = '<div class="error">No hay links en la hoja.</div>';
+          return;
+        }
+
+        for (const r of data) {
+          const title = (r[0] || "").trim();
+          const url = (r[1] || "").trim();
+
+          if (!title || !url) continue;
+
+          const badge = makeBadge(url);
+
+          const a = document.createElement("a");
+          a.className = "link";
+          a.href = url;
+          a.target = "_blank";
+          a.rel = "noopener";
+
+          a.innerHTML = `
+            <span>${safeText(title)}</span>
+            <span class="badge">${safeText(badge)}</span>
+          `;
+
+          linksDiv.appendChild(a);
+        }
+
+      } catch (e) {
+        linksDiv.innerHTML = "";
+        msg.style.display = "block";
+        msg.textContent = "Error cargando links. Revisá que la hoja esté publicada como CSV.";
+      }
+    }
+
+    cargarLinks();
+  </script>
 </body>
 </html>
